@@ -1,87 +1,134 @@
 'use client'
-// pages/runner.js
-import { useState, useRef, useEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
+import { PerspectiveCamera } from '@react-three/drei'
 import './globals.css'
-import MovingPlatform from './components/MovingPlatform'
+import CloudBackdrop from './components/CloudBackdrop'
+import Game from './components/Game'
+import GameUI from './components/GameUI'
+import MainMenu from './components/MainMenu'
+import GameOver from './components/GameOver'
+
+type GameState = 'menu' | 'playing' | 'gameover'
 
 export default function Runner() {
-  // Character movement state
-  const [moveX, setMoveX] = useState(0)
-  const [moveY, setMoveY] = useState(0)
+  const gameRef = useRef<any>(null)
+  const [gameState, setGameState] = useState<GameState>('menu')
+  const [score, setScore] = useState(0)
+  const [highscore, setHighscore] = useState(0)
+  const [isPaused, setIsPaused] = useState(false)
 
-  // Platform movement state
-  const platformRef = useRef()
+  // Load highscore from localStorage on mount
+  useEffect(() => {
+    const savedHighscore = localStorage.getItem('endlessRunnerHighscore')
+    if (savedHighscore) {
+      setHighscore(parseInt(savedHighscore, 10))
+    }
+  }, [])
 
-  // Handle left/right arrow key movement
-  const handleKeyDown = (e) => {
-    if (e.key === 'ArrowLeft') {
-      setMoveX((prev) => Math.max(prev - 0.5, -2)); // Move left with bounds
-    }
-    if (e.key === 'ArrowRight') {
-      setMoveX((prev) => Math.min(prev + 0.5, 2)); // Move right with bounds
-    }
+  // Poll game state every 100ms
+  useEffect(() => {
+    if (gameState !== 'playing') return
 
-     if (e.key === 'ArrowUp') {
-      setMoveY((prev) => Math.min(prev + 0.5, 2)); // Move up with bounds
-    }
-     if (e.key === 'ArrowDown') {
-      setMoveY((prev) => Math.min(prev - 0.5, -2)); // Move down with bounds
+    const interval = setInterval(() => {
+      if (gameRef.current) {
+        setScore(gameRef.current.score)
+        setIsPaused(gameRef.current.isPaused)
+      }
+    }, 100)
+    return () => clearInterval(interval)
+  }, [gameState])
+
+  const handleStartGame = () => {
+    setScore(0)
+    setIsPaused(false)
+    setGameState('playing')
+    if (gameRef.current) {
+      gameRef.current.resetGame()
     }
   }
 
-  // Attach event listener for key down
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  const handleGameOver = () => {
+    if (score > highscore) {
+      setHighscore(score)
+      localStorage.setItem('endlessRunnerHighscore', score.toString())
+    }
+    setGameState('gameover')
+  }
+
+  const handleMainMenu = () => {
+    setGameState('menu')
+  }
+
+  const handleRestart = () => {
+    handleStartGame()
+  }
+
+  const handleResetStats = () => {
+    setHighscore(0)
+    localStorage.removeItem('endlessRunnerHighscore')
+  }
+
+  const handlePause = () => {
+    if (gameRef.current) {
+      gameRef.current.setPaused(true)
+      setIsPaused(true)
+    }
+  }
+
+  const handleResume = () => {
+    if (gameRef.current) {
+      gameRef.current.setPaused(false)
+      setIsPaused(false)
+    }
+  }
 
   return (
-    <Canvas>
-      {/* Camera */}
-      <PerspectiveCamera makeDefault position={[0, 2, 5]} fov={75} />
-      <OrbitControls enableZoom={false} />
+    <>
+      {gameState === 'menu' && (
+        <MainMenu 
+          highscore={highscore} 
+          onStartGame={handleStartGame}
+          onResetStats={handleResetStats}
+        />
+      )}
 
-      {/* Lighting */}
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 5, 5]} intensity={1} />
+      {gameState === 'gameover' && (
+        <GameOver 
+          score={score}
+          highscore={highscore}
+          isNewHighscore={score >= highscore}
+          onMainMenu={handleMainMenu}
+          onRestart={handleRestart}
+        />
+      )}
 
-      {/* Ground (Endless platform) */}
-      <MovingPlatform ref={platformRef} />
+      {gameState === 'playing' && (
+        <>
+          <Canvas>
+            {/* Camera */}
+            <PerspectiveCamera makeDefault position={[0, 2, 5]} fov={75} />
+            {/* Subtle moving cloud background */}
+            <CloudBackdrop speed={0.01} />
 
-      {/* Character */}
-      <Character position={[moveX, moveY, 0]} />
-    </Canvas>
-  )
-}
+            {/* Lighting */}
+            <ambientLight intensity={0.5} />
+            <directionalLight position={[5, 5, 5]} intensity={1} />
 
-// function MovingPlatform() {
-//   const ref = useRef()
+            {/* Game contains player and endless platform logic */}
+            <Game ref={gameRef} onGameOver={handleGameOver} />
+          </Canvas>
 
-//   // Simulate platform movement
-//   useEffect(() => {
-//     const interval = setInterval(() => {
-//       if (ref.current) {
-//         ref.current.position.z += 0.1
-//       }
-//     }, 100)
-//     return () => clearInterval(interval)
-//   }, [])
-
-//   return (
-//     <mesh ref={ref} position={[0, 0, -5]} scale={[2, 1, 100]}>
-//       <boxGeometry args={[2, 1, 100]} />
-//       <meshStandardMaterial color="green" />
-//     </mesh>
-//   )
-// }
-
-function Character({ position }) {
-  return (
-    <mesh position={position}>
-      <boxGeometry args={[1, 2, 1]} />
-      <meshStandardMaterial color="blue" />
-    </mesh>
+          {/* UI rendered outside Canvas as HTML overlay */}
+          <GameUI 
+            score={score} 
+            highscore={highscore}
+            isPaused={isPaused} 
+            onPause={handlePause}
+            onResume={handleResume}
+          />
+        </>
+      )}
+    </>
   )
 }
